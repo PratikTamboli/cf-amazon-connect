@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Simple Amazon Connect use case in raw CloudFormation: hours of operation,
+  queue, routing profile, security profile, an agent user, and a contact flow
+  that greets the caller and transfers them into the queue.
+
+Parameters:
+  InstanceArn:
+    Type: String
+    Description: ARN of an existing Amazon Connect instance.
+
+  AgentUsername:
+    Type: String
+    Default: janedoe
+
+  AgentPassword:
+    Type: String
+    NoEcho: true
+    Description: Must be 8+ chars, one upper, one lower, one digit.
+
+Resources:
+
+  HoursOfOperation:
+    Type: AWS::Connect::HoursOfOperation
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: SimpleHoursOfOperation
+      TimeZone: America/New_York
+      Config:
+        - Day: MONDAY
+          StartTime: { Hours: 9, Minutes: 0 }
+          EndTime: { Hours: 17, Minutes: 0 }
+        - Day: TUESDAY
+          StartTime: { Hours: 9, Minutes: 0 }
+          EndTime: { Hours: 17, Minutes: 0 }
+        - Day: WEDNESDAY
+          StartTime: { Hours: 9, Minutes: 0 }
+          EndTime: { Hours: 17, Minutes: 0 }
+        - Day: THURSDAY
+          StartTime: { Hours: 9, Minutes: 0 }
+          EndTime: { Hours: 17, Minutes: 0 }
+        - Day: FRIDAY
+          StartTime: { Hours: 9, Minutes: 0 }
+          EndTime: { Hours: 17, Minutes: 0 }
+
+  Queue:
+    Type: AWS::Connect::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: SimpleQueue
+      HoursOfOperationArn: !GetAtt HoursOfOperation.HoursOfOperationArn
+
+  SecurityProfile:
+    Type: AWS::Connect::SecurityProfile
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      SecurityProfileName: SimpleAgentSecurityProfile
+      Permissions:
+        - BasicAgentAccess
+        - OutboundCallAccess
+
+  RoutingProfile:
+    Type: AWS::Connect::RoutingProfile
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: SimpleRoutingProfile
+      Description: Routes voice contacts to SimpleQueue.
+      DefaultOutboundQueueArn: !GetAtt Queue.QueueArn
+      MediaConcurrencies:
+        - Channel: VOICE
+          Concurrency: 1
+      QueueConfigs:
+        - Delay: 0
+          Priority: 1
+          QueueReference:
+            Channel: VOICE
+            QueueArn: !GetAtt Queue.QueueArn
+
+  Agent:
+    Type: AWS::Connect::User
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Username: !Ref AgentUsername
+      Password: !Ref AgentPassword
+      IdentityInfo:
+        FirstName: Jane
+        LastName: Doe
+      PhoneConfig:
+        PhoneType: SOFT_PHONE
+      RoutingProfileArn: !GetAtt RoutingProfile.RoutingProfileArn
+      SecurityProfileArns:
+        - !GetAtt SecurityProfile.SecurityProfileArn
+
+  SimpleContactFlow:
+    Type: AWS::Connect::ContactFlow
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: SimpleFlow
+      Type: CONTACT_FLOW
+      State: ACTIVE
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "greeting",
+          "Actions": [
+            {
+              "Identifier": "greeting",
+              "Type": "MessageParticipant",
+              "Parameters": {
+                "Text": "Thanks for calling. Please hold while we connect you with the next available agent."
+              },
+              "Transitions": {
+                "NextAction": "setQueue",
+                "Errors": [{ "NextAction": "errorMessage", "ErrorType": "NoMatchingError" }]
+              }
+            },
+            {
+              "Identifier": "setQueue",
+              "Type": "UpdateContactTargetQueue",
+              "Parameters": {
+                "QueueId": "${Queue.QueueArn}"
+              },
+              "Transitions": {
+                "NextAction": "transferToQueue",
+                "Errors": [{ "NextAction": "errorMessage", "ErrorType": "NoMatchingError" }]
+              }
+            },
+            {
+              "Identifier": "transferToQueue",
+              "Type": "TransferContactToQueue",
+              "Parameters": {},
+              "Transitions": {
+                "NextAction": "disconnect",
+                "Errors": [
+                  { "NextAction": "errorMessage", "ErrorType": "QueueAtCapacity" },
+                  { "NextAction": "errorMessage", "ErrorType": "NoMatchingError" }
+                ]
+              }
+            },
+            {
+              "Identifier": "errorMessage",
+              "Type": "MessageParticipant",
+              "Parameters": {
+                "Text": "Sorry, we're unable to take your call right now. Please try again later."
+              },
+              "Transitions": {
+                "NextAction": "disconnect",
+                "Errors": [{ "NextAction": "disconnect", "ErrorType": "NoMatchingError" }]
+              }
+            },
+            {
+              "Identifier": "disconnect",
+              "Type": "DisconnectParticipant",
+              "Parameters": {},
+              "Transitions": {}
+            }
+          ]
+        }
+
+Outputs:
+  QueueArn:
+    Value: !GetAtt Queue.QueueArn
+  RoutingProfileArn:
+    Value: !GetAtt RoutingProfile.RoutingProfileArn
+  ContactFlowArn:
+    Value: !GetAtt SimpleContactFlow.ContactFlowArn
+  AgentUserArn:
+    Value: !GetAtt Agent.UserArn
