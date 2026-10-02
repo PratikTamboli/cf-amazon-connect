@@ -22,6 +22,8 @@ Resources:
 
   HoursOfOperation:
     Type: AWS::Connect::HoursOfOperation
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       InstanceArn: !Ref InstanceArn
       Name: SimpleHoursOfOperation
