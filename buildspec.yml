@@ -1,10 +1,32 @@
 version: 0.2
 
+env:
+  variables:
+    TEMPLATE_FILE: templates/simple-flow.yaml
+
 phases:
+  install:
+    commands:
+      - echo "Installing cfn-lint"
+      - pip install cfn-lint
+      - cfn-lint --version
+
+  pre_build:
+    commands:
+      - echo "Checking template file exists"
+      - test -f "$TEMPLATE_FILE"
+      - ls -la templates/
+
   build:
     commands:
-      - echo "Validating CloudFormation template"
-      - aws cloudformation validate-template --template-body file://templates/simple-flow.yaml
+      - echo "Linting CloudFormation template"
+      - cfn-lint "$TEMPLATE_FILE"
+      - echo "Validating template with AWS"
+      - aws cloudformation validate-template --template-body "file://$TEMPLATE_FILE"
+
+  post_build:
+    commands:
+      - echo "Build finished. Template is ready for deploy stage."
 
 artifacts:
   files:
